@@ -1,0 +1,57 @@
+---
+- name: Download and Install Binary via GraphQL
+  hosts: all
+  become: yes
+  vars:
+    gql_url: "https://apple.com/graphql"
+    auth_token: "Bearer YOUR_TOKEN_HERE"
+    temp_path: "/tmp"
+    query: |
+      {
+        "query": "query { getBinaryDownloadLink { url } }"
+      }
+    zip_filename: "binary_package.zip"
+    install_script: "install.sh"
+
+  tasks:
+    - name: Create temp directory
+      file:
+        path: "{{ temp_path }}"
+        state: directory
+        mode: '0755'
+
+    - name: Send GraphQL request and get zip file
+      uri:
+        url: "{{ gql_url }}"
+        method: POST
+        headers:
+          Content-Type: "application/json"
+          Authorization: "{{ auth_token }}"
+        body: "{{ query }}"
+        body_format: json
+        return_content: yes
+      register: gql_response
+
+    - name: Save zip file from GraphQL response
+      copy:
+        content: "{{ gql_response.content }}"
+        dest: "{{ temp_path }}/{{ zip_filename }}"
+      when: "'PK' in gql_response.content"  # zip magic header (optional check)
+
+    - name: Extract zip file
+      unarchive:
+        src: "{{ temp_path }}/{{ zip_filename }}"
+        dest: "{{ temp_path }}"
+        remote_src: yes
+
+    - name: Find the extracted folder
+      find:
+        paths: "{{ temp_path }}"
+        file_type: directory
+        patterns: "*"
+      register: extracted_dirs
+
+    - name: Run the install script
+      command: "bash {{ item.path }}/{{ install_script }}"
+      with_items: "{{ extracted_dirs.files }}"
+      when: item.path is match('.*binary.*')  # adjust as per extracted folder name
